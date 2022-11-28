@@ -1,91 +1,34 @@
 App = {}
-UI = require "ui/ui"
+local UI = require "ui/ui"
+local vcb = require "vcb"
+require "curves"
 
-local e_tool = { names = { "Select", "Line", "PolyLine", "Curve" } }
+local e_tool = { names = { "Select", "Line", "PolyLine", "Curve", "Circle" } }
 e_tool.select = 1
 e_tool.line = 2
 e_tool.polyline = 3
 e_tool.curve = 4
+e_tool.circle = 5
 
-local keyb = { devices = { [ "hand/left" ] = 0, [ "hand/right" ] = 4 },
-	buttons = { [ "trigger" ] = 1, [ "grip" ] = 2, [ "x" ] = 3, [ "a" ] = 3, [ "y" ] = 4, [ "b" ] = 4 } }
-
-local function KeybPressed( device, button )
-	if keyb[ keyb.devices[ device ] + keyb.buttons[ button ] ][ 3 ] == 1 then
-		return true
-	end
-	return false
-end
-
-local function KeybReleased( device, button )
-	if keyb[ keyb.devices[ device ] + keyb.buttons[ button ] ][ 3 ] == 3 then
-		return true
-	end
-	return false
-end
-
-local function KeybDown( device, button )
-	if keyb[ keyb.devices[ device ] + keyb.buttons[ button ] ][ 3 ] == 2 then
-		return true
-	end
-	return false
-end
-
-local function KeybUpdate()
-	for i = 1, 8 do
-		keyb[ i ][ 3 ] = 0
-		if lovr.system.isKeyDown( tostring( i ) ) then
-			if keyb[ i ][ 1 ] == false and keyb[ i ][ 2 ] == false then -- pressed
-				keyb[ i ][ 1 ] = true
-				keyb[ i ][ 2 ] = true
-				keyb[ i ][ 3 ] = 1
-				-- print( i .. " pressed " ..  keyb[ i ][ 3 ])
-			elseif keyb[ i ][ 1 ] == true and keyb[ i ][ 2 ] == true then -- down
-				keyb[ i ][ 3 ] = 2
-				-- print( i .. " down " .. keyb[ i ][ 3 ])
-			end
-		else
-			if keyb[ i ][ 1 ] == true and keyb[ i ][ 2 ] == true then -- released
-				keyb[ i ][ 1 ] = false
-				keyb[ i ][ 2 ] = false
-				keyb[ i ][ 3 ] = 3
-				-- print( i .. " released " .. keyb[ i ][ 3 ] )
-			end
-		end
-	end
-
-	if lovr.headset.wasPressed( "hand/left", "trigger" ) then
-		keyb[ 1 ][ 1 ] = true
-		keyb[ 1 ][ 2 ] = true
-		keyb[ 1 ][ 3 ] = 1
-	elseif lovr.headset.isDown( "hand/left", "trigger" ) then
-		keyb[ 1 ][ 1 ] = true
-		keyb[ 1 ][ 2 ] = true
-		keyb[ 1 ][ 3 ] = 2
-	elseif lovr.headset.wasReleased( "hand/left", "trigger" ) then
-		keyb[ 1 ][ 1 ] = false
-		keyb[ 1 ][ 2 ] = false
-		keyb[ 1 ][ 3 ] = 3
-	end
-end
-
+local mdl_gizmo
 local is_dragging = false
-local scene = { transform = lovr.math.newMat4(), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0, last_transform = lovr.math.newMat4(), point_list = {} }
-local begin_curve = false
+scene = { transform = lovr.math.newMat4( 0, 0.6, -0.3 ), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0, last_transform = lovr.math.newMat4(),
+	point_list = {} }
+layers = { display_names = {} }
+local command_begin = false
 local mdl_controller_l
 local modal_windows = { new_layer = false, delete_layer = false, rename_layer = false }
 local hands = { dominant = "hand/right", non_dominant = "hand/left" }
-local layers = { display_names = {} }
 local layers_text = {}
 local active_tool = e_tool.select
 local active_layer_idx = 1
-local tool_window_m = lovr.math.newMat4( 0, 1.7, -0.5 )
-local layers_window_m = lovr.math.newMat4( 0.3, 1.7, -0.5 )
-local settings_window_m = lovr.math.newMat4( -0.3, 1.7, -0.5 )
-local info_window_m = lovr.math.newMat4( 0, 1.9, -0.5 )
+local tool_window_m = lovr.math.newMat4( 0, 1.2, -0.5 )
+local layers_window_m = lovr.math.newMat4( 0.3, 1.2, -0.5 )
+local settings_window_m = lovr.math.newMat4( -0.3, 1.2, -0.5 )
+local info_window_m = lovr.math.newMat4( 0, 1.5, -0.5 )
 local input = {}
 local tred = lovr.graphics.newTexture( "res/textures/tred.png" )
-local crosshair = { pos = lovr.math.newVec3( 0, 0, 0 ) }
+local crosshair = { pos = lovr.math.newVec3( 0, 0, 0 ), ori = lovr.math.newQuat() }
 input.pressed = lovr.headset.wasPressed
 input.down = lovr.headset.isDown
 input.released = lovr.headset.wasReleased
@@ -121,16 +64,7 @@ local function SceneSetPose( v, q )
 end
 
 function App.Init()
-	if lovr.headset.getDriver() == "desktop" then
-		input.down = KeybDown
-		input.pressed = KeybPressed
-		input.released = KeybReleased
-
-		for i = 1, 8 do
-			keyb[ i ] = { false, false, 0 } -- prev,cur, state (idle, pressed, down, released)
-		end
-	end
-
+	vcb.Init( input )
 	-- UI.Init( "hand/left", "thumbstick", true, 0 )
 	UI.Init()
 
@@ -153,7 +87,7 @@ function App.Init()
 		table.insert( layers.display_names, vis .. v.name )
 	end
 
-	-- shaders
+	-- Shaders
 	local vs = lovr.filesystem.read( "phong.vs" )
 	local fs = lovr.filesystem.read( "phong.fs" )
 	phong_shader = lovr.graphics.newShader( vs, fs )
@@ -162,9 +96,11 @@ function App.Init()
 	local fs = lovr.filesystem.read( "point.fs" )
 	point_shader = lovr.graphics.newShader( vs, fs )
 
+	-- Load models
 	mdl_controller_l = lovr.graphics.newModel( "res/models/controller.glb" )
+	mdl_gizmo = lovr.graphics.newModel( "res/models/gizmo.glb" )
 
-	--NOTE test curve
+	--NOTE test curves
 	local curve = lovr.math.newCurve( -0.2, 1.2, -0.3, 0, 1.2, 0.9, 0.2, 1.2, 0, 0.6, 1.2, 0.1 )
 	table.insert( layers[ active_layer_idx ].curves, curve )
 	local curve = lovr.math.newCurve( -0.2, 0, -0.3, 0, 0, -0.9, 0.2, 0, 0, 0.6, 0, 0.1 )
@@ -172,37 +108,16 @@ function App.Init()
 end
 
 function App.Update( dt )
-	if lovr.headset.getDriver() == "desktop" then
-		KeybUpdate()
-	end
-
+	vcb.Update()
 	UI.InputInfo()
 
 	if input.pressed( "hand/left", "grip" ) then
 		scene.offset:set( mat4( lovr.headset.getPose( "hand/left" ) ):invert() * scene.transform )
 		scene.last_transform:set( scene.transform )
-
-
-		for i, lr in ipairs( layers ) do
-			local layer_curves = {}
-			for j, c in ipairs( layers[ i ].curves ) do
-				local num_pts = c:getPointCount()
-				if num_pts > 1 then
-					local curve_copy = {}
-					for k = 1, num_pts do
-						local x, y, z = c:getPoint( k )
-						local pt = { x = x, y = y, z = z }
-						curve_copy[ #curve_copy + 1 ] = pt
-					end
-					layer_curves[ #layer_curves + 1 ] = curve_copy
-				end
-			end
-			scene.point_list[ #scene.point_list + 1 ] = layer_curves
-		end
+		SavePointList()
 	end
 
 	if input.pressed( "hand/right", "grip" ) then
-		-- scene.c_distance = vec3( lovr.headset.getPosition( "hand/right" ) ).x - vec3( lovr.headset.getPosition( "hand/left" ) ).x
 		scene.old_distance = vec3( lovr.headset.getPosition( "hand/left" ) ):distance( vec3( lovr.headset.getPosition( "hand/right" ) ) )
 	end
 
@@ -217,7 +132,6 @@ function App.Update( dt )
 
 		local scale_diff = 0
 		if input.down( "hand/right", "grip" ) then
-			print( "here" )
 			local cur_distance = vec3( lovr.headset.getPosition( "hand/left" ) ):distance( vec3( lovr.headset.getPosition( "hand/right" ) ) )
 			scale_diff = cur_distance - scene.old_distance
 		end
@@ -257,7 +171,8 @@ function App.Update( dt )
 	local ori = quat( lovr.headset.getOrientation( hands.dominant ) )
 	m:rotate( ori )
 	m:translate( 0, -0.1, 0 )
-	crosshair.pos:set( m:unpack() )
+	crosshair.pos:set( m )
+	crosshair.ori:set( m )
 end
 
 function App.RenderUI( pass )
@@ -458,11 +373,12 @@ function App.RenderGrid( pass )
 	lovr.graphics.setBackgroundColor( colors.background )
 	if settings.show_grid then
 		pass:setColor( colors.grid1 )
-		local m = mat4( SceneGetPosition(), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() )
+		local m = mat4( SceneGetPosition(), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() ):rotate( math.pi / 2, 1, 0, 0 )
 		pass:plane( m, 'line', settings.grid_sections, settings.grid_sections )
 
 		pass:setColor( colors.grid2 )
-		local m = mat4( SceneGetPosition() + vec3( 0, -0.001, 0 ), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() )
+		local m = mat4( SceneGetPosition() + vec3( 0, -0.001, 0 ), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() ):rotate( math.pi / 2, 1, 0
+			, 0 )
 		pass:plane( m, 'line', settings.grid_sections * 10, settings.grid_sections * 10 )
 	end
 end
@@ -476,12 +392,12 @@ function App.RenderAxis( pass )
 
 		pass:setColor( colors.axisY )
 		local a = SceneGetPosition()
-		local b = mat4( a ):rotate( SceneGetOrientation() ):translate( 0, 0, -settings.grid_size / 2 )
+		local b = mat4( a ):rotate( SceneGetOrientation() ):translate( 0, settings.grid_size / 2, 0 )
 		pass:line( a, vec3( b ) )
 
 		pass:setColor( colors.axisZ )
 		local a = SceneGetPosition()
-		local b = mat4( a ):rotate( SceneGetOrientation() ):translate( 0, -settings.grid_size / 2, 0 )
+		local b = mat4( a ):rotate( SceneGetOrientation() ):translate( 0, 0, -settings.grid_size / 2 )
 		pass:line( a, vec3( b ) )
 	end
 end
@@ -496,6 +412,13 @@ function App.RenderControllers( pass )
 	pass:setMaterial( tred )
 	pass:sphere( crosshair.pos, 0.01 )
 	pass:setMaterial()
+
+	pass:setColor( 1, 1, 1 )
+	local v1 = vec3( lovr.headset.getPosition( "head" ) )
+	-- local v2 = vec3( 0, 1, -0.4 )
+	local v2 = SceneGetPosition()
+	local dist = v1:distance( v2 )
+	pass:draw( mdl_gizmo, mat4( v2, vec3( dist * 4 ) ) )
 end
 
 function App.RenderCurves( pass )
@@ -534,16 +457,16 @@ function App.RenderFrame( pass )
 	-- app drawing here
 	if active_tool == e_tool.curve then
 		if input.pressed( hands.dominant, "trigger" ) then
-			if not begin_curve then
+			if not command_begin then
 				local curve = lovr.math.newCurve( crosshair.pos, crosshair.pos )
-				begin_curve = true
+				command_begin = true
 				table.insert( layers[ active_layer_idx ].curves, curve )
 			else
 				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
 				curve:addPoint( crosshair.pos )
 			end
 		else -- Set preview point
-			if begin_curve then
+			if command_begin then
 				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
 				local idx = curve:getPointCount()
 				curve:setPoint( idx, crosshair.pos )
@@ -552,11 +475,11 @@ function App.RenderFrame( pass )
 	end
 
 	--NOTE: finalize curve test
-	if input.pressed( "hand/right", "a" ) and begin_curve then
+	if input.pressed( "hand/right", "a" ) and command_begin then
 		local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
 		local idx = curve:getPointCount()
 		curve:removePoint( idx )
-		begin_curve = false
+		command_begin = false
 		active_tool = e_tool.select
 	end
 
