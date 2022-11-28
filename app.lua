@@ -70,8 +70,7 @@ local function KeybUpdate()
 end
 
 local is_dragging = false
-local scene = { transform = lovr.math.newMat4(), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0,
-	last_transform = lovr.math.newMat4(), point_list = {} }
+local scene = { transform = lovr.math.newMat4(), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0, last_transform = lovr.math.newMat4(), point_list = {} }
 local begin_curve = false
 local mdl_controller_l
 local modal_windows = { new_layer = false, delete_layer = false, rename_layer = false }
@@ -185,27 +184,27 @@ function App.Update( dt )
 
 
 		for i, lr in ipairs( layers ) do
+			local layer_curves = {}
 			for j, c in ipairs( layers[ i ].curves ) do
 				local num_pts = c:getPointCount()
 				if num_pts > 1 then
-
 					local curve_copy = {}
-					
 					for k = 1, num_pts do
 						local x, y, z = c:getPoint( k )
 						local pt = { x = x, y = y, z = z }
-						-- scene.point_list[ #scene.point_list + 1 ] = pt
 						curve_copy[ #curve_copy + 1 ] = pt
 					end
-					scene.point_list[ #scene.point_list + 1 ] = curve_copy
+					layer_curves[ #layer_curves + 1 ] = curve_copy
 				end
 			end
+			scene.point_list[ #scene.point_list + 1 ] = layer_curves
 		end
 	end
 
-	-- if input.pressed( "hand/right", "grip" ) then
-	-- 	scene.c_distance = vec3( lovr.headset.getPosition( "hand/right" ) ).x - vec3( lovr.headset.getPosition( "hand/left" ) ).x
-	-- end
+	if input.pressed( "hand/right", "grip" ) then
+		-- scene.c_distance = vec3( lovr.headset.getPosition( "hand/right" ) ).x - vec3( lovr.headset.getPosition( "hand/left" ) ).x
+		scene.old_distance = vec3( lovr.headset.getPosition( "hand/left" ) ):distance( vec3( lovr.headset.getPosition( "hand/right" ) ) )
+	end
 
 	if input.down( "hand/left", "grip" ) then
 		scene.transform:set( mat4( lovr.headset.getPose( "hand/left" ) ) * (scene.offset) )
@@ -216,16 +215,20 @@ function App.Update( dt )
 		local q_new = quat( scene.transform )
 		local q = q_new * q_old:conjugate()
 
-
-		-- local diff = vec3( v_new - v_old )
-		local diff = vec3( v_new - v_old )
+		local scale_diff = 0
+		if input.down( "hand/right", "grip" ) then
+			print( "here" )
+			local cur_distance = vec3( lovr.headset.getPosition( "hand/left" ) ):distance( vec3( lovr.headset.getPosition( "hand/right" ) ) )
+			scale_diff = cur_distance - scene.old_distance
+		end
 
 		for i, lr in ipairs( layers ) do
 			for j, c in ipairs( layers[ i ].curves ) do
 				local num_pts = c:getPointCount()
 				if num_pts > 1 then
 					for k = 1, num_pts do
-						local v = vec3( scene.point_list[j][ k ].x - v_old.x, scene.point_list[j][ k ].y - v_old.y, scene.point_list[j][ k ].z - v_old.z )
+						local v = vec3( scene.point_list[ i ][ j ][ k ].x - v_old.x, scene.point_list[ i ][ j ][ k ].y - v_old.y, scene.point_list[ i ][ j ][ k ].z - v_old.z )
+						v:mul( 1 + scale_diff, 1 + scale_diff, 1 + scale_diff )
 						v = q:mul( v )
 						v:set( v.x + v_new.x, v.y + v_new.y, v.z + v_new.z )
 						c:setPoint( k, v.x, v.y, v.z )
@@ -233,32 +236,8 @@ function App.Update( dt )
 				end
 			end
 		end
-
-		-- if input.down( "hand/right", "grip" ) then
-
-		-- 	local diff
-		-- 	local cur_dist = vec3( lovr.headset.getPosition( "hand/right" ) ).x - vec3( lovr.headset.getPosition( "hand/left" ) ).x
-
-		-- 	diff = (cur_dist - scene.c_distance) * (0.1)
-
-		-- 	scene.scale = (1 - diff)
-		-- 	print( diff )
-
-		-- 	for i, lr in ipairs( layers ) do
-		-- 		for j, c in ipairs( layers[ i ].curves ) do
-		-- 			local num_pts = c:getPointCount()
-		-- 			if num_pts > 1 then
-		-- 				for k = 1, num_pts do
-		-- 					local x, y, z = c:getPoint( k )
-		-- 					local v = vec3( x, y, z )
-		-- 					v:mul( scene.scale, 1, scene.scale )
-		-- 					c:setPoint( k, v.x, v.y, v.z )
-		-- 				end
-		-- 			end
-		-- 		end
-		-- 	end
-		-- end
 	end
+
 
 	if input.released( "hand/left", "grip" ) then
 		scene.point_list = {}
@@ -574,14 +553,11 @@ function App.RenderFrame( pass )
 
 	--NOTE: finalize curve test
 	if input.pressed( "hand/right", "a" ) and begin_curve then
-		-- if ppp and begin_curve then
 		local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
 		local idx = curve:getPointCount()
 		curve:removePoint( idx )
-		-- print( idx )
 		begin_curve = false
 		active_tool = e_tool.select
-		-- end
 	end
 
 	local ui_passes = App.RenderUI( pass )
