@@ -1,0 +1,19 @@
+{
+	"Lua.diagnostics.globals": [
+		"lovr",
+		"vec3",
+		"quat",
+		"mat4",
+		"ui",
+		"window"
+	],
+	"Lua.runtime.version": "LuaJIT",
+	"Lua.workspace.library": [
+		"D:\\dev\\lovr\\lovr-docs-master\\api",
+		"${3rd}/lovr/library"
+	],
+	"Lua.workspace.checkThirdParty": false,
+	"[yaml]": {
+		"editor.tabSize": 4
+	}
+}
