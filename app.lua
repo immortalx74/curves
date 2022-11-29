@@ -2,8 +2,9 @@ App = {}
 local UI = require "ui/ui"
 local vcb = require "vcb"
 require "curves"
+require "snap"
 
-local e_tool = { names = { "Select", "Line", "PolyLine", "Curve", "Circle" } }
+e_tool = { names = { "Select", "Line", "PolyLine", "Curve", "Circle" } }
 e_tool.select = 1
 e_tool.line = 2
 e_tool.polyline = 3
@@ -15,20 +16,20 @@ local is_dragging = false
 scene = { transform = lovr.math.newMat4( 0, 0.6, -0.3 ), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0, last_transform = lovr.math.newMat4(),
 	point_list = {} }
 layers = { display_names = {} }
-local command_begin = false
+command_begin = false
 local mdl_controller_l
 local modal_windows = { new_layer = false, delete_layer = false, rename_layer = false }
 local hands = { dominant = "hand/right", non_dominant = "hand/left" }
 local layers_text = {}
 local active_tool = e_tool.select
-local active_layer_idx = 1
+active_layer_idx = 1
 local tool_window_m = lovr.math.newMat4( 0, 1.2, -0.5 )
 local layers_window_m = lovr.math.newMat4( 0.3, 1.2, -0.5 )
 local settings_window_m = lovr.math.newMat4( -0.3, 1.2, -0.5 )
 local info_window_m = lovr.math.newMat4( 0, 1.5, -0.5 )
 local input = {}
 local tred = lovr.graphics.newTexture( "res/textures/tred.png" )
-local crosshair = { pos = lovr.math.newVec3( 0, 0, 0 ), ori = lovr.math.newQuat() }
+crosshair = { pos = lovr.math.newVec3( 0, 0, 0 ), ori = lovr.math.newQuat() }
 input.pressed = lovr.headset.wasPressed
 input.down = lovr.headset.isDown
 input.released = lovr.headset.wasReleased
@@ -44,12 +45,21 @@ local colors = {
 	axisZ = { 0, 0, 1 },
 }
 
-local settings = {
+settings = {
 	grid_size = 1,
 	grid_sections = 10,
 	show_grid = true,
 	show_axis = true,
+	snap_distance = 0.02,
+	snap_points = true
 }
+
+function PointInVolume( px, py, pz, vx, vy, vz, vw, vh, vd )
+	if px >= vx and px <= vx + vw and py >= vy and py <= vy + vh and pz >= vz and pz <= vz + vd then
+		return true
+	end
+	return false
+end
 
 local function SceneGetPosition()
 	return vec3( scene.transform )
@@ -173,6 +183,39 @@ function App.Update( dt )
 	m:translate( 0, -0.1, 0 )
 	crosshair.pos:set( m )
 	crosshair.ori:set( m )
+
+	-- NOTE:snap test
+	DoPointSnap()
+
+	-- Draw curve
+	if active_tool == e_tool.curve then
+		if input.pressed( hands.dominant, "trigger" ) then
+			if not command_begin then
+				local curve = lovr.math.newCurve( crosshair.pos, crosshair.pos )
+				command_begin = true
+				table.insert( layers[ active_layer_idx ].curves, curve )
+			else
+				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
+				curve:addPoint( crosshair.pos )
+			end
+		else -- Set preview point
+			if command_begin then
+				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
+				local idx = curve:getPointCount()
+				curve:setPoint( idx, crosshair.pos )
+			end
+		end
+	end
+
+	--NOTE: finalize curve test
+	if input.pressed( "hand/right", "a" ) and command_begin then
+		local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
+		local idx = curve:getPointCount()
+		curve:removePoint( idx )
+		command_begin = false
+		active_tool = e_tool.select
+	end
+
 end
 
 function App.RenderUI( pass )
@@ -232,6 +275,9 @@ function App.RenderUI( pass )
 	end
 	if UI.CheckBox( "Show Axis", settings.show_axis ) then
 		settings.show_axis = not settings.show_axis
+	end
+	if UI.CheckBox( "Snap to points", settings.snap_points ) then
+		settings.snap_points = not settings.snap_points
 	end
 
 	UI.End( pass )
@@ -454,33 +500,6 @@ end
 
 function App.RenderFrame( pass )
 	-- app drawing here
-	if active_tool == e_tool.curve then
-		if input.pressed( hands.dominant, "trigger" ) then
-			if not command_begin then
-				local curve = lovr.math.newCurve( crosshair.pos, crosshair.pos )
-				command_begin = true
-				table.insert( layers[ active_layer_idx ].curves, curve )
-			else
-				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
-				curve:addPoint( crosshair.pos )
-			end
-		else -- Set preview point
-			if command_begin then
-				local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
-				local idx = curve:getPointCount()
-				curve:setPoint( idx, crosshair.pos )
-			end
-		end
-	end
-
-	--NOTE: finalize curve test
-	if input.pressed( "hand/right", "a" ) and command_begin then
-		local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
-		local idx = curve:getPointCount()
-		curve:removePoint( idx )
-		command_begin = false
-		active_tool = e_tool.select
-	end
 
 	local ui_passes = App.RenderUI( pass )
 	App.RenderCurves( pass )
