@@ -373,12 +373,12 @@ function App.RenderGrid( pass )
 	lovr.graphics.setBackgroundColor( colors.background )
 	if settings.show_grid then
 		pass:setColor( colors.grid1 )
-		local m = mat4( SceneGetPosition(), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() ):rotate( math.pi / 2, 1, 0, 0 )
+		local m = mat4( SceneGetPosition(), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() * quat( math.pi / 2, 1, 0, 0 ) )
 		pass:plane( m, 'line', settings.grid_sections, settings.grid_sections )
 
 		pass:setColor( colors.grid2 )
-		local m = mat4( SceneGetPosition() + vec3( 0, -0.001, 0 ), vec3( settings.grid_size, settings.grid_size, 1 ), SceneGetOrientation() ):rotate( math.pi / 2, 1, 0
-			, 0 )
+		local m = mat4( SceneGetPosition() + vec3( 0, -0.001, 0 ), vec3( settings.grid_size, settings.grid_size, 1 ),
+			SceneGetOrientation() * quat( math.pi / 2, 1, 0, 0 ) )
 		pass:plane( m, 'line', settings.grid_sections * 10, settings.grid_sections * 10 )
 	end
 end
