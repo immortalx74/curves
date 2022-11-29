@@ -413,12 +413,11 @@ function App.RenderControllers( pass )
 	pass:sphere( crosshair.pos, 0.01 )
 	pass:setMaterial()
 
-	pass:setColor( 1, 1, 1 )
-	local v1 = vec3( lovr.headset.getPosition( "head" ) )
-	-- local v2 = vec3( 0, 1, -0.4 )
-	local v2 = SceneGetPosition()
-	local dist = v1:distance( v2 )
-	pass:draw( mdl_gizmo, mat4( v2, vec3( dist * 4 ) ) )
+	-- pass:setColor( 1, 1, 1 )
+	-- local v1 = vec3( lovr.headset.getPosition( "head" ) )
+	-- local v2 = SceneGetPosition()
+	-- local dist = v1:distance( v2 )
+	-- pass:draw( mdl_gizmo, mat4( v2, vec3( dist * 4 ) ) )
 end
 
 function App.RenderCurves( pass )
