@@ -11,6 +11,7 @@ e_tool.polyline = 3
 e_tool.curve = 4
 e_tool.circle = 5
 
+grabbed_point = nil
 local mdl_gizmo
 local is_dragging = false
 scene = { transform = lovr.math.newMat4( 0, 0.6, -0.3 ), offset = lovr.math.newMat4(), scale = 1.0, c_distance = 0, last_transform = lovr.math.newMat4(),
@@ -51,7 +52,9 @@ settings = {
 	show_grid = true,
 	show_axis = true,
 	snap_distance = 0.02,
-	snap_points = true
+	snap_points = true,
+	draw_3d_grid = true,
+	selection_radius = 0.01
 }
 
 function PointInVolume( px, py, pz, vx, vy, vz, vw, vh, vd )
@@ -208,12 +211,48 @@ function App.Update( dt )
 	end
 
 	--NOTE: finalize curve test
-	if input.pressed( "hand/right", "a" ) and command_begin then
+	if active_tool == e_tool.curve and input.pressed( "hand/right", "a" ) and command_begin then
 		local curve = layers[ active_layer_idx ].curves[ #layers[ active_layer_idx ].curves ]
 		local idx = curve:getPointCount()
 		curve:removePoint( idx )
 		command_begin = false
 		active_tool = e_tool.select
+	end
+
+
+	-- NOTE move point test
+	if active_tool == e_tool.select and input.pressed( "hand/right", "trigger" ) then
+		local cx, cy, cz = crosshair.pos.x, crosshair.pos.y, crosshair.pos.z
+		local sr = settings.selection_radius
+		for i, lr in ipairs( layers ) do
+			for j, c in ipairs( layers[ i ].curves ) do
+				if lr.visible then
+					local num_pts = c:getPointCount()
+					if num_pts > 1 then
+						for k = 1, num_pts do
+							local x, y, z = c:getPoint( k )
+							if PointInVolume( x, y, z, (cx - sr), (cy - sr), (cz - sr), sr * 2, sr * 2, sr * 2 ) then
+								grabbed_point = { l = i, c = j, p = k, ox = cx - x, oy = cy - y, oz = cz - z }
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local cx, cy, cz = crosshair.pos.x, crosshair.pos.y, crosshair.pos.z
+	if active_tool == e_tool.select and input.down( "hand/right", "trigger" ) then
+		if grabbed_point then
+			local curve = layers[ grabbed_point.l ].curves[ grabbed_point.c ]
+			local x, y, z = curve:getPoint( grabbed_point.p )
+			curve:setPoint( grabbed_point.p, cx - grabbed_point.ox, cy - grabbed_point.oy, cz - grabbed_point.oz )
+		end
+	end
+
+	if active_tool == e_tool.select and input.released( "hand/right", "trigger" ) then
+		grabbed_point = nil
 	end
 
 end
@@ -252,6 +291,7 @@ function App.RenderUI( pass )
 	UI.Label( "Settings" )
 	UI.Separator()
 	local _
+	_, settings.selection_radius = UI.SliderFloat( "Selection radius", settings.selection_radius, 0.005, 0.1 )
 	_, settings.grid_size = UI.SliderFloat( "Grid size", settings.grid_size, 1, 5 )
 	if UI.Button( "-" ) then
 		settings.grid_sections = (settings.grid_sections > 2 and settings.grid_sections - 2) or 2
@@ -427,6 +467,26 @@ function App.RenderGrid( pass )
 			SceneGetOrientation() * quat( math.pi / 2, 1, 0, 0 ) )
 		pass:plane( m, 'line', settings.grid_sections * 10, settings.grid_sections * 10 )
 	end
+
+	if settings.draw_3d_grid then
+
+		pass:setColor( 1, 0, 1 )
+		local interv = settings.grid_size / settings.grid_sections / 10
+		local dx = (math.floor( crosshair.pos.x / interv ) * interv) - SceneGetPosition().x
+		local dy = (math.floor( crosshair.pos.y / interv ) * interv) - SceneGetPosition().y
+		local dz = (math.floor( crosshair.pos.z / interv ) * interv) - SceneGetPosition().z
+		local cx, cy, cz = math.floor( crosshair.pos.x / interv ) * interv, math.floor( crosshair.pos.y / interv ) * interv,
+			math.floor( crosshair.pos.z / interv ) * interv
+
+		local m1 = mat4( -SceneGetPosition(), SceneGetOrientation() ):translate( (math.floor( crosshair.pos.x / interv ) * interv),
+			(math.floor( crosshair.pos.y / interv ) * interv), (math.floor( crosshair.pos.z / interv ) * interv) )
+		local m2 = mat4( -SceneGetPosition(), SceneGetOrientation() ):translate( (math.floor( crosshair.pos.x / interv ) * interv) + 0.1,
+			(math.floor( crosshair.pos.y / interv ) * interv), (math.floor( crosshair.pos.z / interv ) * interv) )
+
+		local v1 = vec3( m1 )
+		local v2 = vec3( m2 )
+		pass:line( v1, v2 )
+	end
 end
 
 function App.RenderAxis( pass )
@@ -456,7 +516,7 @@ function App.RenderControllers( pass )
 	pass:draw( mdl_controller_l, m )
 
 	pass:setMaterial( tred )
-	pass:sphere( crosshair.pos, 0.01 )
+	pass:sphere( crosshair.pos, settings.selection_radius )
 	pass:setMaterial()
 
 	-- pass:setColor( 1, 1, 1 )
@@ -482,6 +542,17 @@ function App.RenderCurves( pass )
 					local t = {}
 					for k = 1, num_pts do
 						local x, y, z = c:getPoint( k )
+
+						if grabbed_point then
+							local curve = layers[ grabbed_point.l ].curves[ grabbed_point.c ]
+							local gx, gy, gz = curve:getPoint( grabbed_point.p )
+							if gx == x and gy == y and gz == z then
+								pass:setColor( 1, 0, 0 )
+							else
+								pass:setColor( colors.points )
+							end
+						end
+
 						pass:points( x, y, z )
 						table.insert( t, x )
 						table.insert( t, y )
