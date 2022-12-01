@@ -11,6 +11,8 @@ e_tool.polyline = 3
 e_tool.curve = 4
 e_tool.circle = 5
 
+circle_m = lovr.math.newMat4()
+scale_diff = 0
 grabbed_point = nil
 local mdl_gizmo
 local is_dragging = false
@@ -54,7 +56,9 @@ settings = {
 	snap_distance = 0.02,
 	snap_points = true,
 	draw_3d_grid = true,
-	selection_radius = 0.01
+	selection_radius = 0.01,
+	show_cages = true,
+	show_points = true
 }
 
 function PointInVolume( px, py, pz, vx, vy, vz, vw, vh, vd )
@@ -83,11 +87,11 @@ function App.Init()
 
 	-- Layers
 	local l
-	l = { name = "one", visible = true, curves = {} }
+	l = { name = "one", visible = true, curves = {}, circles = {} }
 	table.insert( layers, l )
-	l = { name = "two", visible = true, curves = {} }
+	l = { name = "two", visible = true, curves = {}, circles = {} }
 	table.insert( layers, l )
-	l = { name = "three", visible = false, curves = {} }
+	l = { name = "three", visible = false, curves = {}, circles = {} }
 	table.insert( layers, l )
 
 	for i, v in ipairs( layers ) do
@@ -143,7 +147,7 @@ function App.Update( dt )
 		local q_new = quat( scene.transform )
 		local q = q_new * q_old:conjugate()
 
-		local scale_diff = 0
+		-- local scale_diff = 0
 		if input.down( "hand/right", "grip" ) then
 			local cur_distance = vec3( lovr.headset.getPosition( "hand/left" ) ):distance( vec3( lovr.headset.getPosition( "hand/right" ) ) )
 			scale_diff = cur_distance - scene.old_distance
@@ -165,9 +169,14 @@ function App.Update( dt )
 		end
 	end
 
-
 	if input.released( "hand/left", "grip" ) then
 		scene.point_list = {}
+		scene.scale = scene.scale + scale_diff
+		scale_diff = 0
+	end
+
+	if input.released( "hand/right", "grip" ) then
+		-- scale_diff = 0
 	end
 
 	if lovr.headset.wasPressed( "hand/left", "trigger" ) then
@@ -189,6 +198,37 @@ function App.Update( dt )
 
 	-- NOTE:snap test
 	DoPointSnap()
+
+	-- Draw circle
+	if active_tool == e_tool.circle then
+		if input.pressed( hands.dominant, "trigger" ) then
+			if not command_begin then
+				circle_m:set( crosshair.pos, vec3( 0.01 ), quat( 1, 0, 0, 0 ) )
+				command_begin = true
+			else
+				if command_begin then
+					command_begin = false
+					active_tool = e_tool.select
+					local circle = lovr.math.newMat4( circle_m )
+					table.insert( layers[ active_layer_idx ].circles, circle )
+					-- test circle approximation
+					local hr = (vec3( circle_m ):distance( crosshair.pos )) / 2
+					local p1 = vec3( mat4( crosshair.pos, crosshair.ori ) )
+					local p2 = vec3( mat4( crosshair.pos, crosshair.ori ):translate( hr, 0, 0 ) )
+					local p3 = vec3( mat4( crosshair.pos, crosshair.ori ):translate( 2 * hr, -hr, 0 ) )
+					local p4 = vec3( mat4( crosshair.pos, crosshair.ori ):translate( 2 * hr, -(2 * hr), 0 ) )
+					local curve = lovr.math.newCurve( p1, p2, p3, p4 )
+					table.insert( layers[ active_layer_idx ].curves, curve )
+				end
+			end
+		else
+			if command_begin then
+				local pos = vec3( circle_m )
+				local dist = crosshair.pos:distance( pos )
+				circle_m:set( pos, vec3( dist ), crosshair.ori )
+			end
+		end
+	end
 
 	-- Draw curve
 	if active_tool == e_tool.curve then
@@ -277,6 +317,7 @@ function App.RenderUI( pass )
 	UI.Label( "Info" )
 	UI.Separator()
 	UI.Dummy( 500, 0 )
+	UI.Label( "Scale: " .. scene.scale )
 	UI.Label( "Active tool: " .. e_tool.names[ active_tool ], true )
 	local x = string.format( "%.3f", tostring( crosshair.pos.x ) )
 	UI.Label( "X: " .. x, true )
@@ -315,6 +356,12 @@ function App.RenderUI( pass )
 	end
 	if UI.CheckBox( "Show Axis", settings.show_axis ) then
 		settings.show_axis = not settings.show_axis
+	end
+	if UI.CheckBox( "Show Cages", settings.show_cages ) then
+		settings.show_cages = not settings.show_cages
+	end
+	if UI.CheckBox( "Show Points", settings.show_points ) then
+		settings.show_points = not settings.show_points
 	end
 	if UI.CheckBox( "Snap to points", settings.snap_points ) then
 		settings.snap_points = not settings.snap_points
@@ -360,7 +407,7 @@ function App.RenderUI( pass )
 
 		local _, changed, id, txt = UI.TextBox( "Name", 12, "Layer" .. #layers + 1 )
 		if UI.Button( "OK" ) then
-			local l = { name = txt, visible = true, curves = {} }
+			local l = { name = txt, visible = true, curves = {}, circles = {} }
 			table.insert( layers, l )
 			table.insert( layers.display_names, "✔ " .. txt )
 			modal_windows.new_layer = false
@@ -526,6 +573,15 @@ function App.RenderControllers( pass )
 	-- pass:draw( mdl_gizmo, mat4( v2, vec3( dist * 4 ) ) )
 end
 
+function App.RenderCircles( pass )
+	pass:setShader()
+	for i, lr in ipairs( layers ) do
+		for j, c in ipairs( layers[ i ].circles ) do
+			pass:circle( c, "line" )
+		end
+	end
+end
+
 function App.RenderCurves( pass )
 	pass:setShader()
 	for i, lr in ipairs( layers ) do
@@ -552,16 +608,18 @@ function App.RenderCurves( pass )
 								pass:setColor( colors.points )
 							end
 						end
-
-						pass:points( x, y, z )
+						if settings.show_points then
+							pass:points( x, y, z )
+						end
 						table.insert( t, x )
 						table.insert( t, y )
 						table.insert( t, z )
 					end
-
 					pass:setShader()
-					pass:setColor( colors.cage )
-					pass:line( t )
+					if settings.show_cages then
+						pass:setColor( colors.cage )
+						pass:line( t )
+					end
 				end
 			end
 		end
@@ -573,7 +631,14 @@ function App.RenderFrame( pass )
 	-- app drawing here
 
 	local ui_passes = App.RenderUI( pass )
+
+	if active_tool == e_tool.circle and command_begin then
+		pass:setShader()
+		pass:setColor( 1, 0, 0 )
+		pass:circle( circle_m, "line" )
+	end
 	App.RenderCurves( pass )
+	App.RenderCircles( pass )
 	App.SetPhongShader( pass )
 	App.RenderGrid( pass )
 	App.RenderAxis( pass )
