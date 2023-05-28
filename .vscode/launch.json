@@ -9,7 +9,7 @@
 			"type": "cppvsdbg",
 			"request": "launch",
 			"program": "lovr.exe",
-			"args": ["--console","--movespeed", "0.3", "${workspaceFolder}"],
+			"args": ["--console", "${workspaceFolder}"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
